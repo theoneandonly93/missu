@@ -5,7 +5,7 @@ services:
     plan: free
     autoDeploy: true
     buildCommand: bun install
-    startCommand: bun src/bot.ts
+    startCommand: bun backend/src/bot.ts
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         value: ${TELEGRAM_BOT_TOKEN}
