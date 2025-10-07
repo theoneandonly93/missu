@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: missu-burn-bot
+    env: docker
+    plan: free
+    autoDeploy: true
+    buildCommand: bun install
+    startCommand: bun src/bot.ts
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        value: ${TELEGRAM_BOT_TOKEN}
+      - key: HELIUS_API_KEY
+        value: ${HELIUS_API_KEY}
+      - key: JUPITER_API_URL
+        value: https://quote-api.jup.ag/v6
+      - key: SUPABASE_URL
+        value: ${SUPABASE_URL}
+      - key: SUPABASE_KEY
+        value: ${SUPABASE_KEY}
+      - key: MISSU_MINT
+        value: ${MISSU_MINT}
+      - key: BURN_WALLET
+        value: 11111111111111111111111111111111
+      - key: BOT_SOL_PAYER_SECRET
+        value: ${BOT_SOL_PAYER_SECRET}
+      - key: BIRDEYE_API_KEY
+        value: ${BIRDEYE_API_KEY}
+      - key: RPC_URL
+        value: https://api.mainnet-beta.solana.com
+      - key: PORT
+        value: 5000
