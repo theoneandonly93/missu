@@ -6,4 +6,4 @@ COPY . .
 RUN bun install
 
 EXPOSE 5000
-CMD ["bun", "src/bot.ts"]
+CMD ["bun", "backend/src/bot.ts"]
