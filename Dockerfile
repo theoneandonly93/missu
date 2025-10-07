@@ -1,6 +1,7 @@
+
 FROM oven/bun:latest
 
-WORKDIR /app
+WORKDIR /workspaces/missu
 COPY . .
 
 RUN bun install
