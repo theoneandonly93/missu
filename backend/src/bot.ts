@@ -215,8 +215,25 @@ async function start() {
     });
   } else {
     // Polling mode (default)
-    await bot.launch();
-    console.log('Telegram bot polling started');
+    try {
+      // If a webhook is set (for example by another deployment), delete it so getUpdates polling can be used.
+      await bot.telegram.deleteWebhook();
+      console.log('Deleted Telegram webhook (if present) to allow polling');
+    } catch (e) {
+      console.warn('deleteWebhook failed (continuing). If you still get 409, make sure no other bot instance is running.', e);
+    }
+
+    try {
+      // Drop pending updates to avoid processing a backlog
+      await bot.launch({ dropPendingUpdates: true });
+      console.log('Telegram bot polling started (dropPendingUpdates:true)');
+    } catch (err: any) {
+      console.error('Failed to start bot polling', err?.response?.body || err?.message || err);
+      if (err?.response?.body?.description) {
+        console.error('Telegram error description:', err.response.body.description);
+      }
+      process.exit(1);
+    }
   }
 }
 
