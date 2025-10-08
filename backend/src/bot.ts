@@ -12,50 +12,83 @@ import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction 
 const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
 
 bot.start((ctx) => {
-  ctx.reply('Welcome to MISSU Burn Bot! Every command burns a little $MISSU. Viral, self-sustaining, and transparent.');
+  ctx.reply(
+    'Welcome to MISSU Burn Bot!\n\n' +
+      'This bot helps you discover and participate in token burns on Solana.\n' +
+      'Fee system: a small developer fee is taken on certain actions and (by default) converted from SOL into $MISSU and burned or distributed according to the project rules. Live swaps are gated by server configuration for safety.\n\n' +
+      'Available commands:\n' +
+      '/top - top tokens by % percentage\n' +
+      '/burns - recent burns\n' +
+      '/token <mint> - stats for one token\n' +
+      '/watch <mint> - subscribe to alerts\n' +
+      '/unwatch or /unwatchable <mint> - unsubscribe\n' +
+      '/burnlink <mint> <amount> - returns instructions to burn tokens\n' +
+      '/feed - shows how much SOL has been converted & burned in $MISSU\n'
+  );
 });
 
 bot.command('top', async (ctx) => {
   await handleFee();
   const top = await getTopTokens();
-  ctx.reply(top);
+  if (!top) return ctx.reply('No top tokens available right now.');
+  ctx.reply(String(top));
 });
 
 bot.command('burns', async (ctx) => {
   await handleFee();
   const burns = await getBurns();
-  ctx.reply(burns);
+  if (!burns) return ctx.reply('No recent burns found.');
+  ctx.reply(String(burns));
 });
 
 bot.command('token', async (ctx) => {
   await handleFee();
-  const mint = ctx.message.text.split(' ')[1];
+  const parts = ctx.message.text.trim().split(/\s+/);
+  const mint = parts[1];
+  if (!mint) return ctx.reply('Usage: /token <mint>');
   const stats = await getTokenStats(mint);
-  ctx.reply(stats);
+  if (!stats) return ctx.reply(`No stats available for ${mint}`);
+  ctx.reply(String(stats));
 });
 
 bot.command('watch', async (ctx) => {
   await handleFee();
-  const mint = ctx.message.text.split(' ')[1];
+  const parts = ctx.message.text.trim().split(/\s+/);
+  const mint = parts[1];
+  if (!mint) return ctx.reply('Usage: /watch <mint>');
   await subscribe(String(ctx.chat.id), mint);
   ctx.reply(`Subscribed to ${mint} burns.`);
 });
 
 bot.command('unwatch', async (ctx) => {
   await handleFee();
-  const mint = ctx.message.text.split(' ')[1];
+  const parts = ctx.message.text.trim().split(/\s+/);
+  const mint = parts[1];
+  if (!mint) return ctx.reply('Usage: /unwatch <mint>');
+  await unsubscribe(String(ctx.chat.id), mint);
+  ctx.reply(`Unsubscribed from ${mint} burns.`);
+});
+
+// alias requested: /unwatchable
+bot.command('unwatchable', async (ctx) => {
+  await handleFee();
+  const parts = ctx.message.text.trim().split(/\s+/);
+  const mint = parts[1];
+  if (!mint) return ctx.reply('Usage: /unwatchable <mint>');
   await unsubscribe(String(ctx.chat.id), mint);
   ctx.reply(`Unsubscribed from ${mint} burns.`);
 });
 
 bot.command('burnlink', async (ctx) => {
   await handleFee();
-  const parts = ctx.message.text.split(' ').slice(1);
+  const parts = ctx.message.text.trim().split(/\s+/).slice(1);
   const mint = parts[0];
   const amount = parts[1];
   const wallet = parts[2];
+  if (!mint || !amount) return ctx.reply('Usage: /burnlink <mint> <amount> [your_wallet_address]\nReturns instructions to burn tokens.');
   const link = await getBurnLink(mint, amount, wallet);
-  ctx.reply(link);
+  if (!link) return ctx.reply('Failed to generate burn instructions.');
+  ctx.reply(String(link));
 });
 
 // /burn <mint> <amount> - performs on-chain transfer to burn and dev wallets (simulated Jupiter swap)
@@ -151,7 +184,8 @@ bot.command('burn', async (ctx) => {
 bot.command('feed', async (ctx) => {
   await handleFee();
   const feed = await getFeed();
-  ctx.reply(feed);
+  if (!feed) return ctx.reply('No feed available.');
+  ctx.reply(String(feed));
 });
 
 // Bonus: auto-post mode for Telegram channel
