@@ -1,5 +1,8 @@
 // MISSU bot logic: burns, tokens, subscriptions, feed
 // import { supabase } from './db'; // Supabase integration placeholder
+import { Connection, PublicKey, Transaction } from '@solana/web3.js';
+import * as spl from '@solana/spl-token';
+const splAny: any = spl;
 
 export async function getBurns() {
   // Query recent burns from Supabase
@@ -34,11 +37,8 @@ export async function getBurnLink(mint: string, amount: string, wallet?: string)
   if (!wallet) {
     return `To burn tokens, reply with your Solana wallet address. Example:\n/burnlink ${mint} ${amount} <YOUR_WALLET_ADDRESS>`;
   }
-
   // Try to construct an unsigned transaction the user can sign with their wallet.
   try {
-    const { Connection, PublicKey, Transaction } = await import('@solana/web3.js');
-  const spl: any = await import('@solana/spl-token');
     const connection = new Connection(process.env.RPC_URL || 'https://api.mainnet-beta.solana.com', 'confirmed');
 
     const mintPubkey = new PublicKey(mint);
@@ -46,28 +46,55 @@ export async function getBurnLink(mint: string, amount: string, wallet?: string)
     const burnPubkey = new PublicKey(process.env.BURN_WALLET || '11111111111111111111111111111111');
 
     // Find user's associated token account for the mint (may not exist)
-  const userAta = await spl.getAssociatedTokenAddress(mintPubkey, userPubkey);
-  const burnAta = await spl.getAssociatedTokenAddress(mintPubkey, burnPubkey, true);
+    const userAta = await splAny.getAssociatedTokenAddress(mintPubkey, userPubkey);
+    const burnAta = await splAny.getAssociatedTokenAddress(mintPubkey, burnPubkey, true);
 
     // Fetch mint info to get decimals
     const mintAccount = await connection.getParsedAccountInfo(mintPubkey);
     const decimals = Number((mintAccount.value?.data as any)?.parsed?.info?.decimals) || 9;
-    const multiplier = BigInt(10 ** decimals);
     const amountUi = Number(amount);
     if (!Number.isFinite(amountUi) || amountUi <= 0) throw new Error('Invalid amount');
     const amountRaw = BigInt(Math.floor(amountUi * Number(10 ** decimals)));
 
-    // Build transfer instruction: transfer tokens from user's ATA to burn ATA
-  const transferIx = spl.createTransferInstruction(userAta, burnAta, userPubkey, amountRaw);
+    const tx = new Transaction();
 
-    // Build transaction with feePayer = userPubkey (user will sign & pay fee)
+    // If user's ATA doesn't exist, try to add an ATA creation instruction (if available)
+    const ataInfo = await connection.getAccountInfo(userAta);
+    if (!ataInfo) {
+      // Attempt to create ATA instruction using spl helpers if available
+      if (typeof splAny.createAssociatedTokenAccountInstruction === 'function') {
+        try {
+          // createAssociatedTokenAccountInstruction(payer, associatedToken, owner, mint)
+          const ix = splAny.createAssociatedTokenAccountInstruction(userPubkey, userAta, userPubkey, mintPubkey);
+          tx.add(ix);
+        } catch (err) {
+          console.warn('Failed to add createAssociatedTokenAccountInstruction', err);
+        }
+      } else if (typeof splAny.createAssociatedTokenAccount === 'function') {
+        // Some versions expose createAssociatedTokenAccount which returns a promise of the ATA public key;
+        // we cannot run it here since it may submit a transaction. Fall back to manual instructions.
+        console.warn('spl.createAssociatedTokenAccount exists but cannot be used to build unsigned tx here');
+      } else {
+        // No helper available to create ATA programmatically; return manual instructions
+        return `Received wallet ${wallet}. Your associated token account for ${mint} does not exist, and I cannot construct the ATA creation instruction automatically.\n\n` +
+          `Please create an associated token account for this mint and your wallet (one-time):\n` +
+          `You can use the Phantom wallet UI or the Solana CLI:\n` +
+          `  spl-token create-account ${mint} --owner ${wallet}\n\n` +
+          `After creating the ATA, run:\n/burnlink ${mint} ${amount} ${wallet}`;
+      }
+    }
+
+    // Add transfer instruction
+    const transferIx = splAny.createTransferInstruction(userAta, burnAta, userPubkey, amountRaw);
+    tx.add(transferIx);
+
+    // Build unsigned transaction with fee payer = user
     const recent = await connection.getLatestBlockhash('finalized');
-    const tx = new Transaction({ feePayer: userPubkey, recentBlockhash: recent.blockhash }).add(transferIx);
+    tx.recentBlockhash = recent.blockhash;
+    tx.feePayer = userPubkey;
 
     // Serialize unsigned transaction (requireAllSignatures=false) to base64
     const serialized = tx.serialize({ requireAllSignatures: false }).toString('base64');
-
-    // Provide Phantom deep link template (user must URL-encode the txn)
     const encoded = encodeURIComponent(serialized);
     const phantomLink = `https://phantom.app/ul/v1/transaction?txn=${encoded}`;
 

@@ -8,6 +8,8 @@ import { postBurnToChannel } from './helius';
 
 // Solana imports (dynamically imported to avoid startup cost if unused elsewhere)
 import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import * as spl from '@solana/spl-token';
+const splAny: any = spl;
 
 const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
 
@@ -117,11 +119,10 @@ bot.command('burn', async (ctx) => {
     const devWallet = new PublicKey(process.env.DEV_FEE_WALLET || '11111111111111111111111111111111');
 
     // Resolve ATAs
-  // dynamic import to avoid typing mismatches in @solana/spl-token typings
-  const spl: any = await import('@solana/spl-token');
-  const payerAta = await spl.getAssociatedTokenAddress(mintPubkey, payer.publicKey);
-  const burnAta = await spl.getAssociatedTokenAddress(mintPubkey, burnWallet, true);
-  const devAta = await spl.getAssociatedTokenAddress(mintPubkey, devWallet, true);
+  // Use spl-token helpers
+  const payerAta = await splAny.getAssociatedTokenAddress(mintPubkey, payer.publicKey);
+  const burnAta = await splAny.getAssociatedTokenAddress(mintPubkey, burnWallet, true);
+  const devAta = await splAny.getAssociatedTokenAddress(mintPubkey, devWallet, true);
 
   // Determine decimals by fetching mint account
   const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
@@ -146,18 +147,18 @@ bot.command('burn', async (ctx) => {
     let usedBurnInstruction = false;
     if (mintAuthority && String(mintAuthority) === String(payer.publicKey)) {
       try {
-        tx.add(spl.createBurnInstruction(payerAta, mintPubkey, payer.publicKey, BigInt(Math.floor(burnAmountUi * multiplier))));
-        // also transfer dev fee
-        tx.add(spl.createTransferInstruction(payerAta, devAta, payer.publicKey, BigInt(Math.floor(feeAmountUi * multiplier))));
+  tx.add(splAny.createBurnInstruction(payerAta, mintPubkey, payer.publicKey, BigInt(Math.floor(burnAmountUi * multiplier))));
+  // also transfer dev fee
+  tx.add(splAny.createTransferInstruction(payerAta, devAta, payer.publicKey, BigInt(Math.floor(feeAmountUi * multiplier))));
         usedBurnInstruction = true;
       } catch (e) {
         console.warn('Failed to create burn instruction, falling back to transfers', e);
-        tx.add(spl.createTransferInstruction(payerAta, burnAta, payer.publicKey, BigInt(Math.floor(burnAmountUi * multiplier))));
-        tx.add(spl.createTransferInstruction(payerAta, devAta, payer.publicKey, BigInt(Math.floor(feeAmountUi * multiplier))));
+  tx.add(splAny.createTransferInstruction(payerAta, burnAta, payer.publicKey, BigInt(Math.floor(burnAmountUi * multiplier))));
+  tx.add(splAny.createTransferInstruction(payerAta, devAta, payer.publicKey, BigInt(Math.floor(feeAmountUi * multiplier))));
       }
     } else {
-      tx.add(spl.createTransferInstruction(payerAta, burnAta, payer.publicKey, BigInt(Math.floor(burnAmountUi * multiplier))));
-      tx.add(spl.createTransferInstruction(payerAta, devAta, payer.publicKey, BigInt(Math.floor(feeAmountUi * multiplier))));
+  tx.add(splAny.createTransferInstruction(payerAta, burnAta, payer.publicKey, BigInt(Math.floor(burnAmountUi * multiplier))));
+  tx.add(splAny.createTransferInstruction(payerAta, devAta, payer.publicKey, BigInt(Math.floor(feeAmountUi * multiplier))));
     }
 
     const sig = await sendAndConfirmTransaction(connection, tx, [payer]);
