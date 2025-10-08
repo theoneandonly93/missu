@@ -1,5 +1,6 @@
 // MISSU Burn Bot main entry
 import { Telegraf } from 'telegraf';
+import express from 'express';
 import { config } from './env';
 import { handleFee } from './fee';
 import { getBurns, getTopTokens, getTokenStats, subscribe, unsubscribe, getFeed, getBurnLink } from './missu';
@@ -65,5 +66,53 @@ export async function postToChannel(message: string) {
   }
 }
 
-bot.launch();
-console.log('Telegram bot polling started');
+async function start() {
+  if (config.TELEGRAM_WEBHOOK_URL) {
+    // Webhook mode: set webhook and start express server to receive updates
+  const app = express();
+  app.use(express.json());
+
+  // Use a parameterized path so we can include the raw token in the webhook URL
+  const webhookPath = '/webhook/:token';
+
+  // set Telegram webhook to the provided URL + path (include encoded token)
+  const webhookUrl = config.TELEGRAM_WEBHOOK_URL.replace(/\/$/, '') + '/webhook/' + encodeURIComponent(config.TELEGRAM_BOT_TOKEN);
+    try {
+      await bot.telegram.setWebhook(webhookUrl);
+      console.log('Telegram webhook set to', webhookUrl);
+    } catch (err) {
+      console.error('Failed to set Telegram webhook', err);
+      throw err;
+    }
+
+    app.post(webhookPath, async (req, res) => {
+      try {
+        // basic token check - ensure incoming path token matches the configured bot token
+        const incoming = req.params.token;
+        if (incoming !== config.TELEGRAM_BOT_TOKEN && decodeURIComponent(incoming) !== config.TELEGRAM_BOT_TOKEN) {
+          console.warn('Received webhook with invalid token');
+          return res.sendStatus(401);
+        }
+        await bot.handleUpdate(req.body as any);
+        res.sendStatus(200);
+      } catch (err) {
+        console.error('Error handling update', err);
+        res.sendStatus(500);
+      }
+    });
+
+    const port = Number(config.PORT || 5000);
+    app.listen(port, () => {
+      console.log(`Express webhook server listening on port ${port}`);
+    });
+  } else {
+    // Polling mode (default)
+    await bot.launch();
+    console.log('Telegram bot polling started');
+  }
+}
+
+start().catch((err) => {
+  console.error('Failed to start bot', err);
+  process.exit(1);
+});

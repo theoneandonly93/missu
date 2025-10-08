@@ -2,6 +2,8 @@
 export const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
   TELEGRAM_CHANNEL_ID: process.env.TELEGRAM_CHANNEL_ID || '', // for auto-post mode
+  // If set, bot will run in webhook mode and listen on PORT. Example: https://your-domain.com
+  TELEGRAM_WEBHOOK_URL: process.env.TELEGRAM_WEBHOOK_URL || '',
   HELIUS_API_KEY: process.env.HELIUS_API_KEY || '',
   JUPITER_API_URL: process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6',
   SUPABASE_URL: process.env.SUPABASE_URL || '',
