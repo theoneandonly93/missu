@@ -50,8 +50,11 @@ bot.command('unwatch', async (ctx) => {
 
 bot.command('burnlink', async (ctx) => {
   await handleFee();
-  const [mint, amount] = ctx.message.text.split(' ').slice(1);
-  const link = await getBurnLink(mint, amount);
+  const parts = ctx.message.text.split(' ').slice(1);
+  const mint = parts[0];
+  const amount = parts[1];
+  const wallet = parts[2];
+  const link = await getBurnLink(mint, amount, wallet);
   ctx.reply(link);
 });
 
@@ -215,23 +218,58 @@ async function start() {
     });
   } else {
     // Polling mode (default)
+    // Try to remove any webhook and start polling. If Telegram reports a 409 (another getUpdates)
+    // we'll retry with exponential backoff a few times since the lock can be transient.
     try {
-      // If a webhook is set (for example by another deployment), delete it so getUpdates polling can be used.
-      await bot.telegram.deleteWebhook();
-      console.log('Deleted Telegram webhook (if present) to allow polling');
+      const info = await bot.telegram.getWebhookInfo();
+      console.log('Current Telegram webhook info:', info || '<none>');
     } catch (e) {
-      console.warn('deleteWebhook failed (continuing). If you still get 409, make sure no other bot instance is running.', e);
+      // non-fatal, continue
+      console.warn('Could not fetch webhook info (continuing)', e);
     }
 
-    try {
-      // Drop pending updates to avoid processing a backlog
-      await bot.launch({ dropPendingUpdates: true });
-      console.log('Telegram bot polling started (dropPendingUpdates:true)');
-    } catch (err: any) {
-      console.error('Failed to start bot polling', err?.response?.body || err?.message || err);
-      if (err?.response?.body?.description) {
-        console.error('Telegram error description:', err.response.body.description);
+    const maxAttempts = 6;
+    let attempt = 0;
+    let started = false;
+    while (attempt < maxAttempts && !started) {
+      attempt++;
+      try {
+        // Ensure webhook is removed and pending updates are dropped on the server
+        await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+        console.log('Deleted Telegram webhook (if present) to allow polling (attempt', attempt, ')');
+      } catch (e) {
+        console.warn('deleteWebhook failed (continuing). If you still get 409, make sure no other bot instance is running.', e);
       }
+
+      try {
+        // Drop pending updates to avoid processing a backlog
+        await bot.launch({ dropPendingUpdates: true });
+        console.log('Telegram bot polling started (dropPendingUpdates:true)');
+        started = true;
+        break;
+      } catch (err: any) {
+        const body = err?.response?.body || err?.body || {};
+        const desc = body?.description || err?.message || String(err);
+        console.error(`Failed to start bot polling (attempt ${attempt}):`, desc);
+
+        // If it's a 409 conflict caused by another getUpdates, wait and retry
+        const code = body?.error_code || err?.statusCode || err?.code;
+        const isConflict = code === 409 || (typeof desc === 'string' && desc.includes('terminated by other getUpdates'));
+        if (!isConflict) {
+          // non-retryable error
+          console.error('Non-retryable error while starting polling. Aborting.');
+          process.exit(1);
+        }
+
+        // Otherwise, wait with exponential backoff and retry
+        const waitMs = Math.min(30_000, 1000 * Math.pow(2, attempt - 1));
+        console.log(`Received 409 conflict from Telegram. Will retry in ${waitMs}ms (attempt ${attempt}/${maxAttempts})`);
+        await new Promise((res) => setTimeout(res, waitMs));
+      }
+    }
+
+    if (!started) {
+      console.error(`Failed to start polling after ${maxAttempts} attempts. Ensure no other bot instance is running and webhook is not set elsewhere.`);
       process.exit(1);
     }
   }

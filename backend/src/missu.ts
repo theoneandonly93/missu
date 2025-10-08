@@ -29,11 +29,62 @@ export async function unsubscribe(chatId: string, mint: string) {
   // ...implementation
 }
 
-export async function getBurnLink(mint: string, amount: string) {
-  // Step 1: Prompt user for their wallet address
-  // In production, you can use Telegram deep linking or a wallet connect flow
-  return `To burn tokens, reply with your Solana wallet address. Example:\n/burnlink ${mint} ${amount} <YOUR_WALLET_ADDRESS>`;
+export async function getBurnLink(mint: string, amount: string, wallet?: string) {
+  // If wallet is not provided, prompt the user to reply with their wallet address.
+  if (!wallet) {
+    return `To burn tokens, reply with your Solana wallet address. Example:\n/burnlink ${mint} ${amount} <YOUR_WALLET_ADDRESS>`;
+  }
 
+  // Try to construct an unsigned transaction the user can sign with their wallet.
+  try {
+    const { Connection, PublicKey, Transaction } = await import('@solana/web3.js');
+  const spl: any = await import('@solana/spl-token');
+    const connection = new Connection(process.env.RPC_URL || 'https://api.mainnet-beta.solana.com', 'confirmed');
+
+    const mintPubkey = new PublicKey(mint);
+    const userPubkey = new PublicKey(wallet);
+    const burnPubkey = new PublicKey(process.env.BURN_WALLET || '11111111111111111111111111111111');
+
+    // Find user's associated token account for the mint (may not exist)
+  const userAta = await spl.getAssociatedTokenAddress(mintPubkey, userPubkey);
+  const burnAta = await spl.getAssociatedTokenAddress(mintPubkey, burnPubkey, true);
+
+    // Fetch mint info to get decimals
+    const mintAccount = await connection.getParsedAccountInfo(mintPubkey);
+    const decimals = Number((mintAccount.value?.data as any)?.parsed?.info?.decimals) || 9;
+    const multiplier = BigInt(10 ** decimals);
+    const amountUi = Number(amount);
+    if (!Number.isFinite(amountUi) || amountUi <= 0) throw new Error('Invalid amount');
+    const amountRaw = BigInt(Math.floor(amountUi * Number(10 ** decimals)));
+
+    // Build transfer instruction: transfer tokens from user's ATA to burn ATA
+  const transferIx = spl.createTransferInstruction(userAta, burnAta, userPubkey, amountRaw);
+
+    // Build transaction with feePayer = userPubkey (user will sign & pay fee)
+    const recent = await connection.getLatestBlockhash('finalized');
+    const tx = new Transaction({ feePayer: userPubkey, recentBlockhash: recent.blockhash }).add(transferIx);
+
+    // Serialize unsigned transaction (requireAllSignatures=false) to base64
+    const serialized = tx.serialize({ requireAllSignatures: false }).toString('base64');
+
+    // Provide Phantom deep link template (user must URL-encode the txn)
+    const encoded = encodeURIComponent(serialized);
+    const phantomLink = `https://phantom.app/ul/v1/transaction?txn=${encoded}`;
+
+    return `Unsigned transaction ready for ${wallet} to burn ${amount} of ${mint}.\n\n` +
+      `1) Open this link in a browser on the device with your Phantom wallet:\n${phantomLink}\n\n` +
+      `2) If your wallet supports transactions via deep link it will prompt to sign and send.\n\n` +
+      `If your wallet does not accept the deep link, copy this base64 payload and import it into a wallet or signing tool:\n${serialized}\n\n` +
+      `After signing and submitting the transaction, you can paste the transaction signature here and the bot will log it.`;
+  } catch (e: any) {
+    console.error('Failed to build unsigned tx for burnlink', e);
+    // Fallback to instructions
+    return `Received wallet ${wallet}. I couldn't build an unsigned transaction automatically (reason: ${String(e?.message || e)}).\n\n` +
+      `Please manually send ${amount} ${mint} tokens from your wallet to the burn address:\n` +
+      `${process.env.BURN_WALLET || '11111111111111111111111111111111'}\n\n` +
+      `Or use the bot's auto-burn: /burn ${mint} ${amount}`;
+  }
+}
   /*
   // Step 2: If wallet address is provided, generate transaction
   const { PublicKey, Transaction, Connection } = await import('@solana/web3.js');
@@ -53,7 +104,7 @@ export async function getBurnLink(mint: string, amount: string) {
   const solanaPayUrl = `https://phantom.app/solana-pay?transaction=${txBase64}`;
   return `Burn link: ${solanaPayUrl}`;
   */
-}
+
 
 export async function getFeed() {
   // Show how much SOL has been converted & burned in $MISSU

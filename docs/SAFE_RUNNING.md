@@ -3,7 +3,7 @@ Run the bot (safely)
 Environment variables (examples)
 
 ```env
-TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
+TELEGRAM_BOT_TOKEN=8493484601:AAE1HYhkrfS-LdMZ90FcFOmt2lzgjqUekas
 BOT_SOL_PAYER_SECRET=[1,2,3,...]            # JSON array of secret key bytes (recommended)
 # or BOT_SOL_PAYER_SECRET=base58string      # base58 encoded secret key
 DEV_FEE_WALLET=YourDevWalletPubkey
