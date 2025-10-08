@@ -46,8 +46,19 @@ export async function getBurnLink(mint: string, amount: string, wallet?: string)
     const burnPubkey = new PublicKey(process.env.BURN_WALLET || '11111111111111111111111111111111');
 
     // Find user's associated token account for the mint (may not exist)
-    const userAta = await splAny.getAssociatedTokenAddress(mintPubkey, userPubkey);
-    const burnAta = await splAny.getAssociatedTokenAddress(mintPubkey, burnPubkey, true);
+    const userAta = await spl.Token.getAssociatedTokenAddress(
+      spl.ASSOCIATED_TOKEN_PROGRAM_ID,
+      spl.TOKEN_PROGRAM_ID,
+      mintPubkey,
+      userPubkey
+    );
+    const burnAta = await spl.Token.getAssociatedTokenAddress(
+      spl.ASSOCIATED_TOKEN_PROGRAM_ID,
+      spl.TOKEN_PROGRAM_ID,
+      mintPubkey,
+      burnPubkey,
+      true
+    );
 
     // Fetch mint info to get decimals
     const mintAccount = await connection.getParsedAccountInfo(mintPubkey);
@@ -58,34 +69,45 @@ export async function getBurnLink(mint: string, amount: string, wallet?: string)
 
     const tx = new Transaction();
 
-    // If user's ATA doesn't exist, try to add an ATA creation instruction (if available)
-    const ataInfo = await connection.getAccountInfo(userAta);
-    if (!ataInfo) {
-      // Attempt to create ATA instruction using spl helpers if available
-      if (typeof splAny.createAssociatedTokenAccountInstruction === 'function') {
-        try {
-          // createAssociatedTokenAccountInstruction(payer, associatedToken, owner, mint)
-          const ix = splAny.createAssociatedTokenAccountInstruction(userPubkey, userAta, userPubkey, mintPubkey);
-          tx.add(ix);
-        } catch (err) {
-          console.warn('Failed to add createAssociatedTokenAccountInstruction', err);
-        }
-      } else if (typeof splAny.createAssociatedTokenAccount === 'function') {
-        // Some versions expose createAssociatedTokenAccount which returns a promise of the ATA public key;
-        // we cannot run it here since it may submit a transaction. Fall back to manual instructions.
-        console.warn('spl.createAssociatedTokenAccount exists but cannot be used to build unsigned tx here');
-      } else {
-        // No helper available to create ATA programmatically; return manual instructions
-        return `Received wallet ${wallet}. Your associated token account for ${mint} does not exist, and I cannot construct the ATA creation instruction automatically.\n\n` +
-          `Please create an associated token account for this mint and your wallet (one-time):\n` +
-          `You can use the Phantom wallet UI or the Solana CLI:\n` +
-          `  spl-token create-account ${mint} --owner ${wallet}\n\n` +
-          `After creating the ATA, run:\n/burnlink ${mint} ${amount} ${wallet}`;
-      }
+    // Optimistic mode: always attach ATA creation instructions (user will be payer for both),
+    // wallets that can't handle them will reject the tx.
+    try {
+      const ixUser = spl.Token.createAssociatedTokenAccountInstruction(
+        spl.ASSOCIATED_TOKEN_PROGRAM_ID,
+        spl.TOKEN_PROGRAM_ID,
+        mintPubkey,
+        userAta,
+        userPubkey,
+        userPubkey
+      );
+      tx.add(ixUser);
+    } catch (err) {
+      console.warn('Failed to attach user ATA creation instruction (continuing optimistically)', err);
     }
 
-    // Add transfer instruction
-    const transferIx = splAny.createTransferInstruction(userAta, burnAta, userPubkey, amountRaw);
+    try {
+      const ixBurn = spl.Token.createAssociatedTokenAccountInstruction(
+        spl.ASSOCIATED_TOKEN_PROGRAM_ID,
+        spl.TOKEN_PROGRAM_ID,
+        mintPubkey,
+        burnAta,
+        burnPubkey,
+        userPubkey // user will pay to create the burn ATA
+      );
+      tx.add(ixBurn);
+    } catch (err) {
+      console.warn('Failed to attach burn ATA creation instruction (continuing optimistically)', err);
+    }
+
+    // Add transfer instruction (use spl.Token helper)
+    const transferIx = spl.Token.createTransferInstruction(
+      spl.TOKEN_PROGRAM_ID,
+      userAta,
+      burnAta,
+      userPubkey,
+      [],
+      Number(amountRaw)
+    );
     tx.add(transferIx);
 
     // Build unsigned transaction with fee payer = user

@@ -9,7 +9,6 @@ import { postBurnToChannel } from './helius';
 // Solana imports (dynamically imported to avoid startup cost if unused elsewhere)
 import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
 import * as spl from '@solana/spl-token';
-const splAny: any = spl;
 
 const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
 
@@ -118,11 +117,27 @@ bot.command('burn', async (ctx) => {
     const burnWallet = new PublicKey(process.env.BURN_WALLET || '11111111111111111111111111111111');
     const devWallet = new PublicKey(process.env.DEV_FEE_WALLET || '11111111111111111111111111111111');
 
-    // Resolve ATAs
-  // Use spl-token helpers
-  const payerAta = await splAny.getAssociatedTokenAddress(mintPubkey, payer.publicKey);
-  const burnAta = await splAny.getAssociatedTokenAddress(mintPubkey, burnWallet, true);
-  const devAta = await splAny.getAssociatedTokenAddress(mintPubkey, devWallet, true);
+    // Resolve ATAs using installed @solana/spl-token v0.1.x API
+    const payerAta = await spl.Token.getAssociatedTokenAddress(
+      spl.ASSOCIATED_TOKEN_PROGRAM_ID,
+      spl.TOKEN_PROGRAM_ID,
+      mintPubkey,
+      payer.publicKey
+    );
+    const burnAta = await spl.Token.getAssociatedTokenAddress(
+      spl.ASSOCIATED_TOKEN_PROGRAM_ID,
+      spl.TOKEN_PROGRAM_ID,
+      mintPubkey,
+      burnWallet,
+      true
+    );
+    const devAta = await spl.Token.getAssociatedTokenAddress(
+      spl.ASSOCIATED_TOKEN_PROGRAM_ID,
+      spl.TOKEN_PROGRAM_ID,
+      mintPubkey,
+      devWallet,
+      true
+    );
 
   // Determine decimals by fetching mint account
   const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
@@ -147,18 +162,72 @@ bot.command('burn', async (ctx) => {
     let usedBurnInstruction = false;
     if (mintAuthority && String(mintAuthority) === String(payer.publicKey)) {
       try {
-  tx.add(splAny.createBurnInstruction(payerAta, mintPubkey, payer.publicKey, BigInt(Math.floor(burnAmountUi * multiplier))));
-  // also transfer dev fee
-  tx.add(splAny.createTransferInstruction(payerAta, devAta, payer.publicKey, BigInt(Math.floor(feeAmountUi * multiplier))));
+        tx.add(
+          spl.Token.createBurnInstruction(
+            spl.TOKEN_PROGRAM_ID,
+            mintPubkey,
+            payerAta,
+            payer.publicKey,
+            [],
+            Number(BigInt(Math.floor(burnAmountUi * multiplier)))
+          )
+        );
+        // also transfer dev fee
+        tx.add(
+          spl.Token.createTransferInstruction(
+            spl.TOKEN_PROGRAM_ID,
+            payerAta,
+            devAta,
+            payer.publicKey,
+            [],
+            Number(BigInt(Math.floor(feeAmountUi * multiplier)))
+          )
+        );
         usedBurnInstruction = true;
       } catch (e) {
         console.warn('Failed to create burn instruction, falling back to transfers', e);
-  tx.add(splAny.createTransferInstruction(payerAta, burnAta, payer.publicKey, BigInt(Math.floor(burnAmountUi * multiplier))));
-  tx.add(splAny.createTransferInstruction(payerAta, devAta, payer.publicKey, BigInt(Math.floor(feeAmountUi * multiplier))));
+        tx.add(
+          spl.Token.createTransferInstruction(
+            spl.TOKEN_PROGRAM_ID,
+            payerAta,
+            burnAta,
+            payer.publicKey,
+            [],
+            Number(BigInt(Math.floor(burnAmountUi * multiplier)))
+          )
+        );
+        tx.add(
+          spl.Token.createTransferInstruction(
+            spl.TOKEN_PROGRAM_ID,
+            payerAta,
+            devAta,
+            payer.publicKey,
+            [],
+            Number(BigInt(Math.floor(feeAmountUi * multiplier)))
+          )
+        );
       }
     } else {
-  tx.add(splAny.createTransferInstruction(payerAta, burnAta, payer.publicKey, BigInt(Math.floor(burnAmountUi * multiplier))));
-  tx.add(splAny.createTransferInstruction(payerAta, devAta, payer.publicKey, BigInt(Math.floor(feeAmountUi * multiplier))));
+      tx.add(
+        spl.Token.createTransferInstruction(
+          spl.TOKEN_PROGRAM_ID,
+          payerAta,
+          burnAta,
+          payer.publicKey,
+          [],
+          Number(BigInt(Math.floor(burnAmountUi * multiplier)))
+        )
+      );
+      tx.add(
+        spl.Token.createTransferInstruction(
+          spl.TOKEN_PROGRAM_ID,
+          payerAta,
+          devAta,
+          payer.publicKey,
+          [],
+          Number(BigInt(Math.floor(feeAmountUi * multiplier)))
+        )
+      );
     }
 
     const sig = await sendAndConfirmTransaction(connection, tx, [payer]);
